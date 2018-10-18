@@ -7,16 +7,14 @@ class InvalidCache < StandardError ; end
 
 class EuCentralBank < Money::Bank::VariableExchange
 
-  ECB_RATES_URL = 'http://www.ecb.int/stats/eurofxref/eurofxref-daily.xml'
-  CURRENCIES = %w(USD JPY BGN CZK DKK GBP HUF LTL LVL PLN RON SEK CHF NOK HRK RUB TRY AUD BRL CAD CNY HKD IDR INR KRW MXN MYR NZD PHP SGD THB ZAR)
+  attr_accessor :last_updated
+  attr_accessor :rates_updated_at
+
+  ECB_RATES_URL = 'http://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml'
+  CURRENCIES = %w(USD JPY BGN CZK DKK GBP HUF ILS LTL LVL PLN RON SEK CHF NOK HRK RUB TRY AUD BRL CAD CNY HKD IDR INR KRW MXN MYR NZD PHP SGD THB ZAR)
 
   def update_rates(cache=nil)
-    exchange_rates(cache).each do |exchange_rate|
-      rate = exchange_rate.attribute("rate").value.to_f
-      currency = exchange_rate.attribute("currency").value
-      add_rate("EUR", currency, rate)
-    end
-    add_rate("EUR", "EUR", 1)
+    update_parsed_rates(doc(cache))
   end
 
   def save_rates(cache)
@@ -25,6 +23,14 @@ class EuCentralBank < Money::Bank::VariableExchange
       io = open(ECB_RATES_URL) ;
       io.each_line {|line| file.puts line}
     end
+  end
+
+  def update_rates_from_s(content)
+    update_parsed_rates(doc_from_s(content))
+  end
+
+  def save_rates_to_s
+    open(ECB_RATES_URL).read
   end
 
   def exchange(cents, from_currency, to_currency)
@@ -43,10 +49,28 @@ class EuCentralBank < Money::Bank::VariableExchange
 
   protected
 
-  def exchange_rates(cache=nil)
+  def doc(cache)
     rates_source = !!cache ? cache : ECB_RATES_URL
-    doc = Nokogiri::XML(open(rates_source))
-    doc.xpath('gesmes:Envelope/xmlns:Cube/xmlns:Cube//xmlns:Cube')
+    Nokogiri::XML(open(rates_source))
   end
 
+  def doc_from_s(content)
+    Nokogiri::XML(content)
+  end
+
+  def update_parsed_rates(doc)
+    rates = doc.xpath('gesmes:Envelope/xmlns:Cube/xmlns:Cube//xmlns:Cube')
+
+    rates.each do |exchange_rate|
+      rate = exchange_rate.attribute("rate").value.to_f
+      currency = exchange_rate.attribute("currency").value
+      add_rate("EUR", currency, rate)
+    end
+    add_rate("EUR", "EUR", 1)
+
+    rates_updated_at = doc.xpath('gesmes:Envelope/xmlns:Cube/xmlns:Cube/@time').first.value
+    @rates_updated_at = Time.parse(rates_updated_at)
+
+    @last_updated = Time.now
+  end
 end
